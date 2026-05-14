@@ -1,0 +1,21 @@
+[
+  {
+    "id": "dad",
+    "name": "Dad",
+    "relationship": "Father",
+    "phoneModel": "HUAWEI Y5p 2020 32GB Large Memory, Midnight Black, 51095TWX, Black",
+    "osFamily": "Android",
+    "osVersion": "10.0",
+    "carrier": "Vodafone",
+    "techComfort": "low",
+    "notes": [
+      "Prefers simple language and numbered steps",
+      "Often asks about text size, brightness, and calls",
+      "Gets nervous about changing account settings"
+    ],
+    "preferences": {
+      "tone": "patient",
+      "avoidJargon": true
+    }
+  }
+]
