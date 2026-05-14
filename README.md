@@ -39,11 +39,68 @@ Tracing only initialises if **all three** of `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SE
 
 ## How tracing is wired
 
-- `instrumentation.ts` is the Next.js [instrumentation hook](https://nextjs.org/docs/app/building-your-application/optimizing/instrumentation). Next calls it once at boot on the Node runtime.
-- It calls `ensureLangfuseInstrumentation()` in `lib/langfuse.ts`, which sets up an OpenTelemetry `NodeSDK` with a `LangfuseSpanProcessor` and the Arize OpenInference auto-instrumentation for the Anthropic SDK.
-- `lib/dad-support-agent.ts` wraps the chat turn in `startActiveObservation` spans for the profile lookup and the Claude call. Anthropic SDK calls are auto-instrumented.
+### Setup chain
 
-To verify tracing works: start the dev server with all Langfuse vars set, send a chat message, then look for a trace in your Langfuse project.
+1. **`instrumentation.ts`** — the Next.js [instrumentation hook](https://nextjs.org/docs/app/building-your-application/optimizing/instrumentation). Next calls `register()` once at boot, only on the Node runtime (OTEL `NodeSDK` won't run on edge).
+2. **`lib/langfuse.ts`** — `ensureLangfuseInstrumentation()` starts an OpenTelemetry `NodeSDK` with:
+   - `LangfuseSpanProcessor` from `@langfuse/otel` — exports spans to your Langfuse project
+   - `AnthropicInstrumentation` from `@arizeai/openinference-instrumentation-anthropic` — auto-wraps the Anthropic SDK
+   - Init is idempotent and skipped entirely if any of the three Langfuse env vars are missing.
+3. **`app/api/chat/route.ts` and `lib/dad-support-agent.ts`** — add manual spans on top of the auto-instrumentation using `@langfuse/tracing`.
+
+This matches the [official Langfuse Anthropic JS/TS integration](https://langfuse.com/integrations/model-providers/anthropic-js).
+
+### Trace structure (per chat turn)
+
+```
+dad-chat-request                       (span)        ← route.ts, with userId/sessionId/tags
+├── lookup-user-profile                (tool)        ← profile read from data/user-profiles.json
+└── generate-dad-answer                (agent)       ← parent for the model call
+    ├── anthropic.messages.create      (generation)  ← auto-instrumented; full request + response
+    └── web-search × N                 (tool)        ← one per server-side web_search invocation
+```
+
+What you get on each span:
+
+| Span | Type | Captures |
+| --- | --- | --- |
+| `dad-chat-request` | span | User message, `userId`, `sessionId`, tags (`dad-tech-support`, `chat`), app version, final answer preview |
+| `lookup-user-profile` | tool | `userId` in, profile fields out (phone model, OS, carrier) |
+| `generate-dad-answer` | agent | Model name, transport, answer preview, anthropic message id, `webSearchCount` |
+| `anthropic.messages.create` | generation | Full request (system prompt, messages, tool config) and full response (all content blocks) — auto-captured by OpenInference. Token usage and model name come for free. |
+| `web-search` | tool | The exact query Claude ran, result count, and `[ { url, title, pageAge } ]`. Errors (`max_uses_exceeded`, `unavailable`, etc.) are emitted as `ERROR`-level spans with the Anthropic error code as `statusMessage`. |
+
+### Why the manual `web-search` spans exist
+
+`web_search` is a **server-side** Anthropic tool: the model runs the searches inside Anthropic's infrastructure and returns the results inline in the same response. From the client's perspective there is only one SDK call, so the auto-instrumentation produces only one span. The search queries and result URLs are still in that span's response payload — but they aren't filterable or aggregatable across traces.
+
+`lib/dad-support-agent.ts` walks `response.content` after the call, pairs each `server_tool_use` (`name: "web_search"`) with its matching `web_search_tool_result`, and emits one `web-search` observation per invocation. That gives you:
+
+- A filterable span name in Langfuse (`name = web-search`)
+- A per-trace `webSearchCount` to slice on
+- Per-search input/output so you can audit what the model is actually retrieving
+
+If you add other server-side tools later (`web_fetch`, `code_execution`, etc.), follow the same pattern — auto-instrumentation will not split them out for you.
+
+### Trace-level attributes (propagated to all spans)
+
+Set in `app/api/chat/route.ts` via `propagateAttributes`:
+
+- `userId` — from request body or `DAD_DEFAULT_USER_ID`
+- `sessionId` — from request body or a fresh UUID per request
+- `tags` — `["dad-tech-support", "chat"]`
+- `version` — from `package.json`
+- `metadata.feature` — `dad-tech-support-agent`
+
+A `forceFlush()` runs after each request so traces appear in Langfuse without waiting for the OTEL batch interval — important because Next.js route handlers are short-lived.
+
+### Verifying it works
+
+1. Set all three `LANGFUSE_*` vars in `.env`.
+2. Run `npm run dev` and send a chat message that prompts a web search (e.g. *"How do I change text size on my phone?"*).
+3. Open your Langfuse project → Traces. You should see a `dad-chat-request` trace with the structure above, including one or more `web-search` child spans.
+
+If traces don't appear, set `LANGFUSE_LOG_LEVEL=DEBUG` and check the dev server logs.
 
 ## Customising the user profile
 
