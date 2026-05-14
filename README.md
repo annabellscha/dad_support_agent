@@ -1,5 +1,7 @@
 # Dad Tech Support
 
+![Dad Support agent UI](./screenshot.png)
+
 A tiny Next.js chatbot that helps a non-technical user with phone questions. The agent loads a saved user profile (phone model, OS, carrier, tone preferences), then calls the Anthropic Messages API with web search enabled. Each request is traced end-to-end in Langfuse: the chat handler, the profile lookup, and the Claude call.
 
 If `ANTHROPIC_API_KEY` is missing the app still runs — it returns a placeholder reply so the UI is browseable without credentials.
