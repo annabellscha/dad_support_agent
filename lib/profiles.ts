@@ -9,6 +9,7 @@ export type UserProfile = {
   osFamily: string;
   osVersion: string;
   carrier: string;
+  phoneNumbers?: string[];
   techComfort: "low" | "medium" | "high";
   notes: string[];
   preferences: {
@@ -26,4 +27,38 @@ async function loadProfiles() {
 export async function getUserProfile(userId: string) {
   const profiles = await loadProfiles();
   return profiles.find((profile) => profile.id === userId) ?? null;
+}
+
+export function normalizePhoneIdentifier(value: string) {
+  const withoutChannelPrefix = value.trim().replace(/^whatsapp:/i, "");
+  const normalized = withoutChannelPrefix.replace(/[^\d+]/g, "");
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized.startsWith("+")) {
+    return normalized;
+  }
+
+  return `+${normalized}`;
+}
+
+export async function getUserProfileByPhoneNumber(phoneNumber: string) {
+  const normalizedPhoneNumber = normalizePhoneIdentifier(phoneNumber);
+
+  if (!normalizedPhoneNumber) {
+    return null;
+  }
+
+  const profiles = await loadProfiles();
+
+  return (
+    profiles.find((profile) =>
+      profile.phoneNumbers?.some(
+        (candidate) =>
+          normalizePhoneIdentifier(candidate) === normalizedPhoneNumber,
+      ),
+    ) ?? null
+  );
 }

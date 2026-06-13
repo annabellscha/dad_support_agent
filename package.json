@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "langfuse:sync-prompts": "node scripts/sync-langfuse-prompts.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -20,6 +21,7 @@
     "next": "^16.2.4",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
+    "twilio": "^6.0.2",
     "typescript": "^6.0.2"
   },
   "devDependencies": {
