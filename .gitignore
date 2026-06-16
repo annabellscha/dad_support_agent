@@ -2,4 +2,7 @@
 node_modules
 .env
 .env.local
+.codex/config.toml
+.codex/langfuse.json
+.codex/marketplaces/
 npm-debug.log*
