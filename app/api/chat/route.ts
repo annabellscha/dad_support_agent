@@ -86,6 +86,7 @@ export async function POST(request: Request) {
       },
       async () => {
         const agentResponse = await runDadSupportAgent({
+          channel: "chat",
           message,
           history,
           userId,

@@ -7,7 +7,10 @@ import type {
 
 import { startActiveObservation, startObservation } from "@langfuse/tracing";
 
-import { hasAnthropicAutoInstrumentation } from "@/lib/langfuse";
+import {
+  getDadSupportSystemPrompt,
+  type DadSupportPromptMode,
+} from "@/lib/langfuse-prompts";
 import { getUserProfile, type UserProfile } from "@/lib/profiles";
 
 export type ChatTurn = {
@@ -23,9 +26,15 @@ export type AgentResponse = {
 };
 
 type AgentRequest = {
+  channel?: "chat" | "whatsapp";
   message: string;
   history: ChatTurn[];
   userId: string;
+};
+
+type WebSearchLink = {
+  title: string | null;
+  url: string;
 };
 
 let anthropicClient: Anthropic | null = null;
@@ -38,30 +47,6 @@ function getAnthropicClient() {
   }
 
   return anthropicClient;
-}
-
-function buildSystemPrompt(userId: string) {
-  return [
-    "You are replying directly to Dad as if you are his child helping him over text.",
-    "The app already looked up the saved phone profile before you answer.",
-    "Only answer questions about his phone, its settings, the mobile carrier, or apps on the phone.",
-    "This includes how to use features, where settings are, app capabilities, texting, calling, connectivity, notifications, accessibility, and carrier-related phone tasks.",
-    "Do not answer general knowledge, news, politics, coding, shopping, health, legal, finance, or unrelated life questions.",
-    "If the question is outside phone settings, carrier help, or app usage, say briefly that you can help only with his phone, carrier, and apps, then ask him to ask a phone-related question.",
-    "You are allowed to use WebSearch.",
-    "If Dad asks you to look up the manual, official instructions, current app features, current carrier steps, or anything that may have changed, use WebSearch.",
-    "Prefer official manufacturer, carrier, and app help pages when using WebSearch.",
-    "Never say that you cannot look things up online or cannot check the manual.",
-    "Use WebSearch when phone menus, OS settings, app features, manuals, or carrier steps could vary.",
-    "Assume Dad is not technical and hates jargon.",
-    "Sound warm, familiar, and calm, but do not get cheesy or overly chatty.",
-    "Write short numbered steps. Keep each step to one sentence.",
-    "It is fine to say Dad once at the start when it sounds natural.",
-    "Mention the phone type you are using for the answer when it is helpful.",
-    "If you are unsure, ask exactly one short clarifying question.",
-    "Avoid risky suggestions like factory resets unless the user explicitly asks for advanced troubleshooting.",
-    `The default person to help is userId "${userId}".`,
-  ].join(" ");
 }
 
 function buildProfileContext(
@@ -81,13 +66,16 @@ function buildMessages(
   profile: UserProfile | null,
   history: ChatTurn[],
   message: string,
+  includeProfileContext = true,
 ): MessageParam[] {
-  const messages: MessageParam[] = [
-    {
-      role: "user",
-      content: buildProfileContext(profile),
-    },
-  ];
+  const messages: MessageParam[] = includeProfileContext
+    ? [
+        {
+          role: "user",
+          content: buildProfileContext(profile),
+        },
+      ]
+    : [];
 
   for (const turn of history) {
     messages.push({
@@ -102,6 +90,106 @@ function buildMessages(
   });
 
   return messages;
+}
+
+function parseBooleanEnv(
+  value: string | undefined,
+  defaultValue: boolean,
+) {
+  if (!value) {
+    return defaultValue;
+  }
+
+  const normalizedValue = value.trim().toLowerCase();
+
+  if (normalizedValue === "true") {
+    return true;
+  }
+
+  if (normalizedValue === "false") {
+    return false;
+  }
+
+  return defaultValue;
+}
+
+function parsePositiveIntegerEnv(
+  value: string | undefined,
+  defaultValue: number,
+) {
+  const parsedValue = value ? Number.parseInt(value.trim(), 10) : NaN;
+
+  if (Number.isFinite(parsedValue) && parsedValue > 0) {
+    return parsedValue;
+  }
+
+  return defaultValue;
+}
+
+function getChannelConfig(channel: "chat" | "whatsapp") {
+  if (channel === "whatsapp") {
+    return {
+      maxTokens: parsePositiveIntegerEnv(process.env.WHATSAPP_MAX_TOKENS, 450),
+      model:
+        process.env.WHATSAPP_ANTHROPIC_MODEL ||
+        process.env.ANTHROPIC_MODEL ||
+        process.env.CLAUDE_CODE_MODEL ||
+        "claude-sonnet-4-5",
+      webSearchEnabled: parseBooleanEnv(
+        process.env.WHATSAPP_ENABLE_WEB_SEARCH,
+        false,
+      ),
+    };
+  }
+
+  return {
+    maxTokens: 900,
+    model:
+      process.env.ANTHROPIC_MODEL ||
+      process.env.CLAUDE_CODE_MODEL ||
+      "claude-sonnet-4-5",
+    webSearchEnabled: true,
+  };
+}
+
+function appendChannelPromptSuffix(
+  systemPrompt: string,
+  channel: "chat" | "whatsapp",
+  webSearchEnabled: boolean,
+) {
+  if (channel !== "whatsapp") {
+    return systemPrompt;
+  }
+
+  const suffix = webSearchEnabled
+    ? "This reply is for live WhatsApp, so keep it concise and practical."
+    : "This reply is for live WhatsApp. Keep it concise and practical, and do not use WebSearch in this turn.";
+
+  return `${systemPrompt} ${suffix}`;
+}
+
+function parsePromptMode(
+  message: string,
+): {
+  normalizedMessage: string;
+  promptMode: DadSupportPromptMode;
+} {
+  const codeRedPrefixPattern = /^\s*code\s+red\b[\s:,-]*/i;
+  const match = message.match(codeRedPrefixPattern);
+
+  if (!match) {
+    return {
+      normalizedMessage: message,
+      promptMode: "default",
+    };
+  }
+
+  const normalizedMessage = message.slice(match[0].length).trim();
+
+  return {
+    normalizedMessage: normalizedMessage || message.trim(),
+    promptMode: "code-red",
+  };
 }
 
 function extractAnswerText(
@@ -121,6 +209,53 @@ function extractAnswerText(
     })
     .join("\n")
     .trim();
+}
+
+function extractWebSearchLinks(
+  content: Anthropic.Messages.ContentBlock[],
+): WebSearchLink[] {
+  const seenUrls = new Set<string>();
+  const links: WebSearchLink[] = [];
+
+  for (const block of content) {
+    if (block.type !== "web_search_tool_result" || !Array.isArray(block.content)) {
+      continue;
+    }
+
+    for (const result of block.content) {
+      if (!result.url || seenUrls.has(result.url)) {
+        continue;
+      }
+
+      seenUrls.add(result.url);
+      links.push({
+        title: result.title ?? null,
+        url: result.url,
+      });
+    }
+  }
+
+  return links;
+}
+
+function appendSourceLinks(
+  answer: string,
+  webSearchLinks: WebSearchLink[],
+) {
+  if (webSearchLinks.length === 0 || /https?:\/\//i.test(answer)) {
+    return answer;
+  }
+
+  const helpfulLinks = webSearchLinks
+    .slice(0, 2)
+    .map((link, index) =>
+      link.title
+        ? `${index + 1}. ${link.title}: ${link.url}`
+        : `${index + 1}. ${link.url}`,
+    )
+    .join("\n");
+
+  return `${answer}\n\nHelpful links:\n${helpfulLinks}`;
 }
 
 function traceWebSearchInvocations(
@@ -221,6 +356,7 @@ function toLangfuseUsageDetails(
 }
 
 export async function runDadSupportAgent({
+  channel = "chat",
   message,
   history,
   userId,
@@ -257,13 +393,30 @@ export async function runDadSupportAgent({
     };
   }
 
-  const systemPrompt = buildSystemPrompt(userId);
-  const requestMessages = buildMessages(profile, history, message);
-  const model =
-    process.env.ANTHROPIC_MODEL ||
-    process.env.CLAUDE_CODE_MODEL ||
-    "claude-sonnet-4-5";
-  const usesAnthropicAutoInstrumentation = hasAnthropicAutoInstrumentation();
+  const { normalizedMessage, promptMode } = parsePromptMode(message);
+  const systemPromptDetails = await getDadSupportSystemPrompt(userId, promptMode);
+  const channelConfig = getChannelConfig(channel);
+  const systemPrompt = appendChannelPromptSuffix(
+    systemPromptDetails.content,
+    channel,
+    channelConfig.webSearchEnabled,
+  );
+  const requestMessages = buildMessages(
+    profile,
+    history,
+    normalizedMessage,
+    promptMode !== "code-red",
+  );
+  const model = channelConfig.model;
+  const tools = channelConfig.webSearchEnabled
+    ? [
+        {
+          name: "web_search" as const,
+          type: "web_search_20250305" as const,
+          max_uses: 3,
+        },
+      ]
+    : undefined;
 
   try {
     const liveResponse = await startActiveObservation(
@@ -273,107 +426,119 @@ export async function runDadSupportAgent({
           input: {
             historyLength: history.length,
             message,
+            normalizedMessage,
           },
           metadata: {
+            channel,
             model,
+            managedPrompt: systemPromptDetails.prompt,
+            promptMode,
+            promptSource: systemPromptDetails.source,
             transport: "anthropic-sdk",
             userId,
-            usesAnthropicAutoInstrumentation,
+            webSearchEnabled: channelConfig.webSearchEnabled,
           },
         });
 
-        const generation = usesAnthropicAutoInstrumentation
-          ? null
-          : startObservation(
-              "anthropic-messages-api",
-              {
+        const result = await startActiveObservation(
+          "dad-support-generation",
+          async (generation) => {
+            generation.update({
+              input: {
+                messages: requestMessages,
+                rawUserMessage: message,
+                systemPrompt,
+                transformedUserMessage: normalizedMessage,
+              },
+              metadata: {
+                channel,
+                outputFormat: "text",
+                promptMode,
+                promptSource: systemPromptDetails.source,
+                toolChoice: "auto",
+                ...(tools ? { tools } : {}),
+                transport: "anthropic-sdk",
+                userId,
+              },
+              model,
+              modelParameters: {
+                max_tokens: channelConfig.maxTokens,
+              },
+              prompt: systemPromptDetails.prompt,
+            });
+
+            try {
+              const response = await getAnthropicClient().messages.create({
                 model,
-                input: {
-                  systemPrompt,
-                  messages: requestMessages,
-                },
+                max_tokens: channelConfig.maxTokens,
+                system: systemPrompt,
+                messages: requestMessages,
+                ...(tools ? { tools } : {}),
+              });
+              const webSearchCount = traceWebSearchInvocations(response.content);
+              const webSearchLinks = extractWebSearchLinks(response.content);
+              const answer = appendSourceLinks(
+                extractAnswerText(response.content),
+                webSearchLinks,
+              );
+
+              if (!answer) {
+                throw new Error("Anthropic Messages API returned no text answer.");
+              }
+
+              generation.update({
+                output: answer,
+                prompt: systemPromptDetails.prompt,
+                usageDetails: toLangfuseUsageDetails(response.usage),
                 metadata: {
-                  transport: "anthropic-sdk",
-                  tools: [
-                    {
-                      name: "web_search",
-                      type: "web_search_20250305",
-                      max_uses: 3,
-                    },
-                  ],
-                  outputFormat: "json",
-                  userId,
+                  channel,
+                  contentBlocks: response.content,
+                  stopReason: response.stop_reason,
+                  stopSequence: response.stop_sequence ?? undefined,
+                  anthropicMessageId: response.id,
+                  promptMode,
+                  promptSource: systemPromptDetails.source,
+                  rawAssistantText: extractAnswerText(response.content),
+                  webSearchEnabled: channelConfig.webSearchEnabled,
+                  webSearchCount,
+                  webSearchLinks,
                 },
-              },
-              { asType: "generation" },
-            );
+              });
 
-        try {
-          const response = await getAnthropicClient().messages.create({
-            model,
-            max_tokens: 900,
-            system: systemPrompt,
-            messages: requestMessages,
-            tools: [
-              {
-                name: "web_search",
-                type: "web_search_20250305",
-                max_uses: 3,
-              },
-            ],
-          });
-          const webSearchCount = traceWebSearchInvocations(response.content);
-          const answer = extractAnswerText(response.content);
+              return {
+                answer,
+                anthropicMessageId: response.id,
+                webSearchCount,
+              };
+            } catch (error) {
+              generation.update({
+                level: "ERROR",
+                prompt: systemPromptDetails.prompt,
+                statusMessage:
+                  error instanceof Error
+                    ? error.message
+                    : "Unknown Claude execution error",
+              });
+              throw error;
+            }
+          },
+          { asType: "generation" },
+        );
 
-          if (!answer) {
-            throw new Error("Anthropic Messages API returned no text answer.");
-          }
+        agentObservation.update({
+          output: {
+            answerPreview: result.answer.slice(0, 240),
+            anthropicMessageId: result.anthropicMessageId,
+            webSearchCount: result.webSearchCount,
+          },
+        });
 
-          generation?.update({
-            output: answer,
-            usageDetails: toLangfuseUsageDetails(response.usage),
-            metadata: {
-              stopReason: response.stop_reason,
-              stopSequence: response.stop_sequence ?? undefined,
-              anthropicMessageId: response.id,
-              webSearchCount,
-            },
-          });
-          generation?.end();
-
-          agentObservation.update({
-            output: {
-              answerPreview: answer.slice(0, 240),
-              anthropicMessageId: response.id,
-              webSearchCount,
-            },
-          });
-
-          return {
-            answer,
-            anthropicMessageId: response.id,
-            mode: "live" as const,
-            profile,
-          };
-        } catch (error) {
-          generation?.update({
-            level: "ERROR",
-            statusMessage:
-              error instanceof Error
-                ? error.message
-                : "Unknown Claude execution error",
-          });
-          generation?.end();
-
-          agentObservation.update({
-            level: "ERROR",
-            statusMessage:
-              error instanceof Error
-                ? error.message
-                : "Unknown Claude execution error",
-          });
-          throw error;
-        }
+        return {
+          answer: result.answer,
+          anthropicMessageId: result.anthropicMessageId,
+          mode: "live" as const,
+          profile,
+        };
       },
       { asType: "agent" },
     );
