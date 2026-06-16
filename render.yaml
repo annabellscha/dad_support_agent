@@ -1,0 +1,42 @@
+services:
+  - type: web
+    name: dad-support-agent
+    runtime: node
+    plan: starter
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ANTHROPIC_MODEL
+        value: claude-sonnet-4-5
+      - key: DAD_DEFAULT_USER_ID
+        value: dad
+      - key: LANGFUSE_PUBLIC_KEY
+        sync: false
+      - key: LANGFUSE_SECRET_KEY
+        sync: false
+      - key: LANGFUSE_BASE_URL
+        sync: false
+      - key: LANGFUSE_TRACING_ENVIRONMENT
+        value: production
+      - key: LANGFUSE_RELEASE
+        value: dad-tech-support@0.1.0
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: dad-support-session-store
+          property: connectionString
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_WEBHOOK_URL
+        sync: false
+      - key: WHATSAPP_ENABLE_WEB_SEARCH
+        value: "false"
+      - key: WHATSAPP_MAX_TOKENS
+        value: "450"
+  - type: keyvalue
+    name: dad-support-session-store
+    plan: starter

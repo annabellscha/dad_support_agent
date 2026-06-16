@@ -26,6 +26,7 @@ export type AgentResponse = {
 };
 
 type AgentRequest = {
+  channel?: "chat" | "whatsapp";
   message: string;
   history: ChatTurn[];
   userId: string;
@@ -89,6 +90,82 @@ function buildMessages(
   });
 
   return messages;
+}
+
+function parseBooleanEnv(
+  value: string | undefined,
+  defaultValue: boolean,
+) {
+  if (!value) {
+    return defaultValue;
+  }
+
+  const normalizedValue = value.trim().toLowerCase();
+
+  if (normalizedValue === "true") {
+    return true;
+  }
+
+  if (normalizedValue === "false") {
+    return false;
+  }
+
+  return defaultValue;
+}
+
+function parsePositiveIntegerEnv(
+  value: string | undefined,
+  defaultValue: number,
+) {
+  const parsedValue = value ? Number.parseInt(value.trim(), 10) : NaN;
+
+  if (Number.isFinite(parsedValue) && parsedValue > 0) {
+    return parsedValue;
+  }
+
+  return defaultValue;
+}
+
+function getChannelConfig(channel: "chat" | "whatsapp") {
+  if (channel === "whatsapp") {
+    return {
+      maxTokens: parsePositiveIntegerEnv(process.env.WHATSAPP_MAX_TOKENS, 450),
+      model:
+        process.env.WHATSAPP_ANTHROPIC_MODEL ||
+        process.env.ANTHROPIC_MODEL ||
+        process.env.CLAUDE_CODE_MODEL ||
+        "claude-sonnet-4-5",
+      webSearchEnabled: parseBooleanEnv(
+        process.env.WHATSAPP_ENABLE_WEB_SEARCH,
+        false,
+      ),
+    };
+  }
+
+  return {
+    maxTokens: 900,
+    model:
+      process.env.ANTHROPIC_MODEL ||
+      process.env.CLAUDE_CODE_MODEL ||
+      "claude-sonnet-4-5",
+    webSearchEnabled: true,
+  };
+}
+
+function appendChannelPromptSuffix(
+  systemPrompt: string,
+  channel: "chat" | "whatsapp",
+  webSearchEnabled: boolean,
+) {
+  if (channel !== "whatsapp") {
+    return systemPrompt;
+  }
+
+  const suffix = webSearchEnabled
+    ? "This reply is for live WhatsApp, so keep it concise and practical."
+    : "This reply is for live WhatsApp. Keep it concise and practical, and do not use WebSearch in this turn.";
+
+  return `${systemPrompt} ${suffix}`;
 }
 
 function parsePromptMode(
@@ -279,6 +356,7 @@ function toLangfuseUsageDetails(
 }
 
 export async function runDadSupportAgent({
+  channel = "chat",
   message,
   history,
   userId,
@@ -317,17 +395,28 @@ export async function runDadSupportAgent({
 
   const { normalizedMessage, promptMode } = parsePromptMode(message);
   const systemPromptDetails = await getDadSupportSystemPrompt(userId, promptMode);
-  const systemPrompt = systemPromptDetails.content;
+  const channelConfig = getChannelConfig(channel);
+  const systemPrompt = appendChannelPromptSuffix(
+    systemPromptDetails.content,
+    channel,
+    channelConfig.webSearchEnabled,
+  );
   const requestMessages = buildMessages(
     profile,
     history,
     normalizedMessage,
     promptMode !== "code-red",
   );
-  const model =
-    process.env.ANTHROPIC_MODEL ||
-    process.env.CLAUDE_CODE_MODEL ||
-    "claude-sonnet-4-5";
+  const model = channelConfig.model;
+  const tools = channelConfig.webSearchEnabled
+    ? [
+        {
+          name: "web_search" as const,
+          type: "web_search_20250305" as const,
+          max_uses: 3,
+        },
+      ]
+    : undefined;
 
   try {
     const liveResponse = await startActiveObservation(
@@ -340,12 +429,14 @@ export async function runDadSupportAgent({
             normalizedMessage,
           },
           metadata: {
+            channel,
             model,
             managedPrompt: systemPromptDetails.prompt,
             promptMode,
             promptSource: systemPromptDetails.source,
             transport: "anthropic-sdk",
             userId,
+            webSearchEnabled: channelConfig.webSearchEnabled,
           },
         });
 
@@ -360,23 +451,18 @@ export async function runDadSupportAgent({
                 transformedUserMessage: normalizedMessage,
               },
               metadata: {
+                channel,
                 outputFormat: "text",
                 promptMode,
                 promptSource: systemPromptDetails.source,
                 toolChoice: "auto",
-                tools: [
-                  {
-                    name: "web_search",
-                    type: "web_search_20250305",
-                    max_uses: 3,
-                  },
-                ],
+                ...(tools ? { tools } : {}),
                 transport: "anthropic-sdk",
                 userId,
               },
               model,
               modelParameters: {
-                max_tokens: 900,
+                max_tokens: channelConfig.maxTokens,
               },
               prompt: systemPromptDetails.prompt,
             });
@@ -384,16 +470,10 @@ export async function runDadSupportAgent({
             try {
               const response = await getAnthropicClient().messages.create({
                 model,
-                max_tokens: 900,
+                max_tokens: channelConfig.maxTokens,
                 system: systemPrompt,
                 messages: requestMessages,
-                tools: [
-                  {
-                    name: "web_search",
-                    type: "web_search_20250305",
-                    max_uses: 3,
-                  },
-                ],
+                ...(tools ? { tools } : {}),
               });
               const webSearchCount = traceWebSearchInvocations(response.content);
               const webSearchLinks = extractWebSearchLinks(response.content);
@@ -411,6 +491,7 @@ export async function runDadSupportAgent({
                 prompt: systemPromptDetails.prompt,
                 usageDetails: toLangfuseUsageDetails(response.usage),
                 metadata: {
+                  channel,
                   contentBlocks: response.content,
                   stopReason: response.stop_reason,
                   stopSequence: response.stop_sequence ?? undefined,
@@ -418,6 +499,7 @@ export async function runDadSupportAgent({
                   promptMode,
                   promptSource: systemPromptDetails.source,
                   rawAssistantText: extractAnswerText(response.content),
+                  webSearchEnabled: channelConfig.webSearchEnabled,
                   webSearchCount,
                   webSearchLinks,
                 },

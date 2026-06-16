@@ -24,6 +24,8 @@ Then open http://localhost:3000.
 
 To test WhatsApp locally, expose your app with a public tunnel such as `ngrok` and point Twilio's incoming-message webhook at `https://your-public-url/api/whatsapp`.
 
+For production, the easiest path is **Vercel + Upstash Redis**: Vercel hosts the Next.js app, and Upstash keeps short WhatsApp session history durable across restarts and deploys.
+
 ## Environment variables
 
 All variables live in `.env`. The app reads them on boot.
@@ -33,7 +35,15 @@ All variables live in `.env`. The app reads them on boot.
 | `ANTHROPIC_API_KEY` | for live mode | Without this the app runs in fallback mode |
 | `ANTHROPIC_MODEL` | no | Defaults to `claude-sonnet-4-5` |
 | `DAD_DEFAULT_USER_ID` | no | Profile id to load from `data/user-profiles.json` (default `dad`) |
+| `REDIS_URL` | optional | Generic Redis connection string for durable WhatsApp history |
+| `UPSTASH_REDIS_REST_URL` | optional | Upstash REST URL, ideal for the Vercel native Upstash integration |
+| `UPSTASH_REDIS_REST_TOKEN` | optional | Upstash REST token paired with `UPSTASH_REDIS_REST_URL` |
 | `TWILIO_AUTH_TOKEN` | for secure WhatsApp webhooks | Validates `X-Twilio-Signature` on incoming Twilio requests |
+| `TWILIO_WEBHOOK_URL` | recommended in production | Exact public webhook URL, for example `https://your-domain.example/api/whatsapp`; avoids signature mismatches behind proxies |
+| `WHATSAPP_ENABLE_WEB_SEARCH` | no | Defaults to `false` for hosted WhatsApp flows to keep webhook latency lower |
+| `WHATSAPP_MAX_TOKENS` | no | Defaults to `450` on WhatsApp requests |
+| `WHATSAPP_SESSION_TTL_SECONDS` | no | Redis session TTL for WhatsApp history (default `86400`) |
+| `WHATSAPP_ANTHROPIC_MODEL` | no | Optional model override for WhatsApp traffic |
 | `LANGFUSE_PUBLIC_KEY` | for tracing | All three Langfuse vars must be set together |
 | `LANGFUSE_SECRET_KEY` | for tracing | |
 | `LANGFUSE_BASE_URL` | for tracing | `https://cloud.langfuse.com` (EU) or `https://us.cloud.langfuse.com` (US) |
@@ -99,9 +109,65 @@ The number can be stored either as `+491234567890` or in Twilio's `whatsapp:+491
 ### Current behavior and limits
 
 - The webhook returns TwiML directly, so Twilio sends the assistant's reply back in the same inbound request cycle.
-- Short conversation history is stored in memory per WhatsApp sender so brief back-and-forth works during a running process.
-- In-memory history is fine for a first version, but for production-grade continuity across deploys or multiple servers you should move that history to Redis, Postgres, or another shared store.
+- If `REDIS_URL` is set, short conversation history is stored in Redis per WhatsApp sender so brief back-and-forth survives deploys and restarts.
+- If the Vercel native Upstash integration is installed, the app also supports `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` out of the box for durable WhatsApp history.
+- If neither Redis option is set, the app falls back to in-memory WhatsApp history only.
+- Hosted WhatsApp requests default to `WHATSAPP_ENABLE_WEB_SEARCH=false` and `WHATSAPP_MAX_TOKENS=450` so replies finish more predictably inside Twilio's webhook response window.
 - Media attachments are not handled yet; this route currently answers text messages only.
+
+## Production deployment
+
+### Recommended host
+
+For this app, the simplest production host is **Vercel**:
+
+- the repo is already a standard Next.js app with `next build`
+- Vercel handles HTTPS, previews, and deploys with minimal setup
+- the native Upstash integration can add durable Redis-backed WhatsApp memory in a few clicks
+- `/api/health` is available for quick verification after deploy
+- for a light-traffic first version, `Vercel Hobby` plus the `Upstash Redis` free tier is enough to get started
+
+### Vercel deployment steps
+
+1. Push this repo to GitHub.
+2. In Vercel, import the repository as a new project.
+3. Add the core environment variables in Vercel:
+   - `ANTHROPIC_API_KEY`
+   - `DAD_DEFAULT_USER_ID`
+   - `TWILIO_AUTH_TOKEN`
+   - `TWILIO_WEBHOOK_URL`
+   - `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL` if tracing should stay on
+4. In Vercel Marketplace, install the **Upstash** integration for this project.
+5. During the Upstash flow, either create a new free Redis database or link an existing one.
+6. Let the integration attach the database credentials to the Vercel project, then redeploy.
+7. Copy the public Vercel URL for the app.
+
+### Why Upstash is the easy persistence option
+
+The WhatsApp route already supports durable history via either:
+
+- `REDIS_URL` for a generic Redis deployment
+- `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` for the native Vercel + Upstash path
+
+If neither is present, follow-up memory becomes best-effort only because history stays in local process memory.
+
+### Twilio production cutover
+
+After the app is deployed:
+
+1. In Twilio Console, open `Messaging > Senders > WhatsApp Senders`.
+2. Open your production sender.
+3. Set the incoming-message webhook to `https://your-vercel-domain/api/whatsapp`.
+4. Set `TWILIO_WEBHOOK_URL` in Vercel to that exact same URL.
+5. Send a live WhatsApp test message and confirm both the reply and the Langfuse trace land correctly.
+
+### Why the webhook URL env matters
+
+Many production hosts sit behind proxies or edge layers. The app can reconstruct the public URL from forwarded headers, but `TWILIO_WEBHOOK_URL` is safer because Twilio signature validation expects the exact URL Twilio requested.
+
+### Alternate host
+
+If you decide later that you want an always-on VM-style host instead of Vercel, the repo still includes [render.yaml](/Users/annabellschafer/dad-supportapp-whatsapp/dad_support_agent/render.yaml) as an alternative Render Blueprint.
 
 ## How tracing is wired
 
@@ -212,8 +278,9 @@ lib/
   langfuse.ts           OTEL + Langfuse setup
   profiles.ts           Profile loader
   twilio-whatsapp.ts    Twilio webhook validation + TwiML response helpers
-  whatsapp-sessions.ts  Lightweight in-memory WhatsApp history
+  whatsapp-sessions.ts  WhatsApp history via memory, Redis, or Upstash
 instrumentation.ts      Next.js boot hook → starts Langfuse
+render.yaml            Optional Render Blueprint (alternative to Vercel)
 ```
 
 ## Scripts

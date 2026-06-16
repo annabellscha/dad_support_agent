@@ -19,6 +19,12 @@ export function getTwilioWebhookParams(formData: FormData): TwilioWebhookParams 
 }
 
 export function getPublicWebhookUrl(request: Request) {
+  const explicitWebhookUrl = process.env.TWILIO_WEBHOOK_URL?.trim();
+
+  if (explicitWebhookUrl) {
+    return explicitWebhookUrl;
+  }
+
   const url = new URL(request.url);
   const forwardedProtocol = pickForwardedHeaderValue(
     request.headers.get("x-forwarded-proto"),

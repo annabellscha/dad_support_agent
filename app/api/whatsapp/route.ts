@@ -73,7 +73,7 @@ export async function POST(request: Request) {
     (params.From && (await getUserProfileByPhoneNumber(params.From))) ||
     null;
   const userId = matchedProfile?.id || process.env.DAD_DEFAULT_USER_ID || "dad";
-  const history = getWhatsAppHistory(sessionId);
+  const history = await getWhatsAppHistory(sessionId);
 
   let traceId: string | null = null;
 
@@ -117,6 +117,7 @@ export async function POST(request: Request) {
           },
           async () => {
             const response = await runDadSupportAgent({
+              channel: "whatsapp",
               message: inboundMessage,
               history,
               userId,
@@ -138,7 +139,7 @@ export async function POST(request: Request) {
       },
     );
 
-    appendWhatsAppExchange(sessionId, inboundMessage, agentResponse.answer);
+    await appendWhatsAppExchange(sessionId, inboundMessage, agentResponse.answer);
 
     await getLangfuseSpanProcessor()?.forceFlush();
 
