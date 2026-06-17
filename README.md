@@ -10,7 +10,8 @@ If `ANTHROPIC_API_KEY` is missing, the app still runs in fallback mode so the UI
 
 - [architecture.md](./architecture.md) — system overview, component map, deployment shape, and design choices
 - [AGENT.md](./AGENT.md) — Codex/operator runbook with human-in-the-loop auth boundaries
-- [render.yaml](/Users/annabellschafer/dad-supportapp-whatsapp/dad_support_agent/render.yaml) — optional Render deployment blueprint
+- [docs/configuration.md](./docs/configuration.md) — full environment variable and configuration reference
+- [render.yaml](./render.yaml) — optional Render deployment blueprint
 
 ## Quick start
 
@@ -22,44 +23,32 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
+## Customize It For Your Own Parents
+
+To adapt this repo for your own family, start with `data/user-profiles.json`.
+
+- Change the saved name, phone model, OS version, carrier, comfort level, and notes.
+- Add `phoneNumbers` if you want incoming WhatsApp messages from a specific number to map to that parent automatically.
+- Update the prompt copy in Langfuse Prompt Management, or edit `lib/langfuse-prompts.json` for the local fallback prompt.
+- Change `DAD_DEFAULT_USER_ID` in `.env.local` if you want a different saved profile to be the default.
+
 ## Environment variables
 
 The app reads configuration from `.env` or `.env.local`.
 
-### Core
+For most setups, the only important variables to think about first are:
 
-| Variable | Required | Notes |
-| --- | --- | --- |
-| `ANTHROPIC_API_KEY` | for live mode | Without it, the app returns fallback replies |
-| `ANTHROPIC_MODEL` | no | Defaults to `claude-sonnet-4-5` |
-| `DAD_DEFAULT_USER_ID` | no | Defaults to `dad` |
+- `ANTHROPIC_API_KEY` for live model responses
+- `TWILIO_AUTH_TOKEN` if you want to use the WhatsApp webhook
+- `DAD_DEFAULT_USER_ID` if you want a different default saved profile
 
-### WhatsApp and persistence
+Optional extras:
 
-| Variable | Required | Notes |
-| --- | --- | --- |
-| `TWILIO_AUTH_TOKEN` | for WhatsApp | Validates inbound Twilio signatures |
-| `TWILIO_WEBHOOK_URL` | recommended in production | Exact public webhook URL, for example `https://your-domain/api/whatsapp` |
-| `REDIS_URL` | optional | Generic Redis URL for WhatsApp session memory |
-| `UPSTASH_REDIS_REST_URL` | optional | Upstash REST endpoint |
-| `UPSTASH_REDIS_REST_TOKEN` | optional | Upstash REST token |
-| `WHATSAPP_ENABLE_WEB_SEARCH` | no | Defaults to `false` for hosted WhatsApp flows |
-| `WHATSAPP_MAX_TOKENS` | no | Defaults to `450` |
-| `WHATSAPP_SESSION_TTL_SECONDS` | no | Defaults to `86400` |
-| `WHATSAPP_ANTHROPIC_MODEL` | no | Optional WhatsApp-specific model override |
+- Redis or Upstash variables for durable WhatsApp session memory
+- Langfuse variables for tracing and prompt management
+- WhatsApp-specific model and token settings
 
-### Langfuse
-
-| Variable | Required | Notes |
-| --- | --- | --- |
-| `LANGFUSE_PUBLIC_KEY` | for tracing | All three Langfuse vars must be set together |
-| `LANGFUSE_SECRET_KEY` | for tracing | |
-| `LANGFUSE_BASE_URL` | for tracing | `https://cloud.langfuse.com` or `https://us.cloud.langfuse.com` |
-| `LANGFUSE_PROMPT_CACHE_TTL_MS` | no | Prompt cache TTL, defaults to `30000` |
-| `LANGFUSE_TRACING_ENVIRONMENT` | no | Example: `development` or `production` |
-| `LANGFUSE_RELEASE` | no | Release label for traces |
-
-Tracing only turns on when all three base Langfuse credentials are present.
+See [docs/configuration.md](./docs/configuration.md) for the full variable list and detailed notes.
 
 ## Twilio WhatsApp
 
@@ -118,6 +107,8 @@ Why:
 6. Redeploy once after Redis is attached.
 7. Point Twilio Sandbox or your production sender to the same webhook URL.
 
+If you want a coding agent to handle the setup flow, point it to [AGENT.md](./AGENT.md).
+
 ### Verify production
 
 Open:
@@ -153,3 +144,9 @@ npm run langfuse:sync-prompts
 - browser chat history is only in the current browser session
 - durable WhatsApp context requires Redis or Upstash
 - Twilio Sandbox is a test path, not a production sender
+
+## Deploy QR
+
+Scan to deploy your own dad support agent
+
+![Deploy your own dad support agent](./docs/deploy-qr.png)
