@@ -2,7 +2,7 @@
 
 ![Dad Support agent UI](./screenshot.png)
 
-A small Next.js assistant for patient phone-help conversations. It can reply through the browser UI or through Twilio WhatsApp, uses a saved user profile for context, can trace requests in Langfuse, and supports a `code red` prompt override for broader assistance.
+A small Next.js assistant for patient phone-help conversations. It can be customized for your own parents, hosted through Vercel and Twilio WhatsApp, uses a saved user profile for context, can trace requests in Langfuse, and supports a `code red` prompt override for broader assistance.
 
 If `ANTHROPIC_API_KEY` is missing, the app still runs in fallback mode so the UI and webhook can be tested without live model credentials.
 
@@ -13,6 +13,32 @@ If `ANTHROPIC_API_KEY` is missing, the app still runs in fallback mode so the UI
 - [docs/configuration.md](./docs/configuration.md) — full environment variable and configuration reference
 - [render.yaml](./render.yaml) — optional Render deployment blueprint
 
+## Customize It For Your Own Parents
+
+To adapt this repo for your own family, start with `data/user-profiles.json`.
+
+- Change the saved name, phone model, OS version, carrier, comfort level, and notes.
+- Add `phoneNumbers` if you want incoming WhatsApp messages from a specific number to map to that parent automatically.
+- Update the prompt copy in Langfuse Prompt Management, or edit `lib/langfuse-prompts.json` for the local fallback prompt.
+- Change `DAD_DEFAULT_USER_ID` in `.env.local` if you want a different saved profile to be the default.
+
+## Let A Coding Agent Host It For You
+
+If you want a coding agent to do most of the setup work, point it to [AGENT.md](./AGENT.md).
+
+That runbook tells the agent how to:
+
+- deploy the app on Vercel
+- wire the Twilio WhatsApp Sandbox webhook
+- attach Redis for session memory
+- verify the hosted app end to end
+
+In that flow, the human mainly needs to:
+
+- log into GitHub, Vercel, and Twilio
+- provide or enter the required secrets
+- approve any billing or account-verification steps
+
 ## Quick start
 
 ```bash
@@ -22,15 +48,6 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
-
-## Customize It For Your Own Parents
-
-To adapt this repo for your own family, start with `data/user-profiles.json`.
-
-- Change the saved name, phone model, OS version, carrier, comfort level, and notes.
-- Add `phoneNumbers` if you want incoming WhatsApp messages from a specific number to map to that parent automatically.
-- Update the prompt copy in Langfuse Prompt Management, or edit `lib/langfuse-prompts.json` for the local fallback prompt.
-- Change `DAD_DEFAULT_USER_ID` in `.env.local` if you want a different saved profile to be the default.
 
 ## Environment variables
 
@@ -107,8 +124,6 @@ Why:
 6. Redeploy once after Redis is attached.
 7. Point Twilio Sandbox or your production sender to the same webhook URL.
 
-If you want a coding agent to handle the setup flow, point it to [AGENT.md](./AGENT.md).
-
 ### Verify production
 
 Open:
@@ -147,6 +162,6 @@ npm run langfuse:sync-prompts
 
 ## Deploy QR
 
-Scan to deploy your own dad support agent
+Scan to customize and host for your own parents
 
 ![Deploy your own dad support agent](./docs/deploy-qr.png)
