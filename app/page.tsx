@@ -18,6 +18,7 @@ const starterPrompts = [
 
 export default function HomePage() {
   const dadProfile = dadProfiles[0];
+  const profileNotes = dadProfile.notes.slice(0, 2);
   const [messages, setMessages] = useState<UIMessage[]>([
     {
       id: "welcome",
@@ -27,7 +28,7 @@ export default function HomePage() {
     },
   ]);
   const [input, setInput] = useState("");
-  const [status, setStatus] = useState("Ready to help Dad without turning this into a Genius Bar visit.");
+  const [status, setStatus] = useState("Ready to guide Dad step by step without making this feel like tech support.");
   const [sessionId] = useState(() => crypto.randomUUID());
   const [lastTraceId, setLastTraceId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -49,7 +50,7 @@ export default function HomePage() {
 
     setMessages(nextHistory);
     setInput("");
-    setStatus("Checking Dad's phone details and lining up the next taps...");
+    setStatus("Checking Dad's phone details and lining up the next taps.");
 
     startTransition(async () => {
       try {
@@ -92,7 +93,7 @@ export default function HomePage() {
 
         if (payload.mode === "live" && payload.profile) {
           setStatus(
-            `Live Claude mode for Dad's ${payload.profile.phoneModel ?? "phone"} on ${payload.profile.osFamily ?? "mobile"}.`,
+            `Live mode is on for Dad's ${payload.profile.phoneModel ?? "phone"} on ${payload.profile.osFamily ?? "mobile"}.`,
           );
           return;
         }
@@ -116,64 +117,84 @@ export default function HomePage() {
   return (
     <main className="page-shell">
       <section className="hero-panel">
-        <div className="eyebrow">Observability Demo Agent</div>
+        <div className="hero-topline">
+          <div className="eyebrow">Family Tech Support</div>
+          <div className="channel-badge">Web + WhatsApp</div>
+        </div>
         <h1>Dad Support agent</h1>
         <p className="hero-copy">
-          A tiny phone-help chatbot Dad can use himself, with saved device details,
-          live web lookup when needed, and replies that sound like family help instead
-          of formal tech support.
+          One calm assistant for everyday phone questions, with saved device context,
+          step-by-step replies, and a tone that feels more like family help than a
+          support queue.
         </p>
+        <div className="support-note">
+          Keeps short WhatsApp follow-ups in context and stays grounded in Dad&apos;s
+          actual phone details.
+        </div>
 
         <div className="profile-card">
-          <span className="profile-badge">Saved profile</span>
+          <div className="profile-card-header">
+            <span className="profile-badge">Saved context</span>
+            <p>This is what the assistant already knows before Dad asks anything.</p>
+          </div>
           <div className="profile-grid">
-            <div>
+            <div className="profile-item">
               <span className="profile-label">Person</span>
               <strong>Dad</strong>
             </div>
-            <div>
+            <div className="profile-item is-wide">
               <span className="profile-label">Phone</span>
               <strong>{dadProfile.phoneModel}</strong>
             </div>
-            <div>
+            <div className="profile-item">
               <span className="profile-label">OS</span>
               <strong>
                 {dadProfile.osFamily} {dadProfile.osVersion}
               </strong>
             </div>
-            <div>
-              <span className="profile-label">Reply style</span>
-              <strong>Patient, familiar, no jargon</strong>
+            <div className="profile-item">
+              <span className="profile-label">Comfort level</span>
+              <strong>{dadProfile.techComfort}</strong>
             </div>
+          </div>
+          <div className="profile-notes">
+            {profileNotes.map((note) => (
+              <div key={note} className="profile-note">
+                {note}
+              </div>
+            ))}
           </div>
         </div>
 
-        <div className="starter-row">
-          {starterPrompts.map((prompt) => (
-            <button
-              key={prompt}
-              className="starter-chip"
-              onClick={() => void sendMessage(prompt)}
-              type="button"
-              disabled={isPending}
-            >
-              {prompt}
-            </button>
-          ))}
+        <div className="starter-section">
+          <div className="section-kicker">Quick starts</div>
+          <div className="starter-row">
+            {starterPrompts.map((prompt) => (
+              <button
+                key={prompt}
+                className="starter-chip"
+                onClick={() => void sendMessage(prompt)}
+                type="button"
+                disabled={isPending}
+              >
+                {prompt}
+              </button>
+            ))}
+          </div>
         </div>
       </section>
 
       <section className="chat-panel">
         <div className="chat-header">
           <div>
-            <div className="chat-title">Texting You Back</div>
+            <div className="chat-title">Conversation</div>
             <div className="chat-subtitle">{status}</div>
             {lastTraceId ? (
-              <div className="trace-caption">Trace {lastTraceId}</div>
+              <div className="trace-caption">Trace active: {lastTraceId}</div>
             ) : null}
           </div>
           <div className={`status-pill ${isPending ? "is-busy" : ""}`}>
-            {isPending ? "Working" : "Standing by"}
+            {isPending ? "Replying" : "Standing by"}
           </div>
         </div>
 
@@ -184,7 +205,7 @@ export default function HomePage() {
               className={`message-bubble ${message.role === "user" ? "is-user" : "is-assistant"}`}
             >
               <span className="message-role">
-                {message.role === "user" ? "Dad" : "You"}
+                {message.role === "user" ? "Dad" : "Support"}
               </span>
               <p>{message.content}</p>
             </article>

@@ -106,7 +106,3 @@ export async function ensureLangfuseInstrumentation() {
 export function getLangfuseSpanProcessor() {
   return getState().spanProcessor;
 }
-
-export function hasAnthropicAutoInstrumentation() {
-  return getState().anthropicAutoInstrumentation;
-}

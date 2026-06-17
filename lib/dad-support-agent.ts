@@ -157,15 +157,20 @@ function appendChannelPromptSuffix(
   channel: "chat" | "whatsapp",
   webSearchEnabled: boolean,
 ) {
-  if (channel !== "whatsapp") {
-    return systemPrompt;
+  const promptParts = [
+    systemPrompt,
+    "Always reply in the same language as the user's latest question. If the message mixes languages, follow the main language of the question and do not switch languages unless the user asks you to.",
+  ];
+
+  if (channel === "whatsapp") {
+    promptParts.push(
+      webSearchEnabled
+        ? "This reply is for live WhatsApp, so keep it concise and practical."
+        : "This reply is for live WhatsApp. Keep it concise and practical, and do not use WebSearch in this turn.",
+    );
   }
 
-  const suffix = webSearchEnabled
-    ? "This reply is for live WhatsApp, so keep it concise and practical."
-    : "This reply is for live WhatsApp. Keep it concise and practical, and do not use WebSearch in this turn.";
-
-  return `${systemPrompt} ${suffix}`;
+  return promptParts.join(" ");
 }
 
 function parsePromptMode(

@@ -78,6 +78,54 @@ flowchart LR
 
 This design keeps WhatsApp simple: one inbound webhook request in, one TwiML response out.
 
+### What kind of agent this is
+
+This app uses Anthropic's standard JavaScript SDK to call Claude, with the agent behavior implemented in the application itself.
+
+The stack is:
+
+- Twilio handles WhatsApp message delivery and webhook calls
+- the Next.js API route receives the inbound request
+- `runDadSupportAgent()` in `lib/dad-support-agent.ts` performs the app-specific agent orchestration
+- Anthropic's standard JavaScript SDK calls Claude through the Messages API
+- Langfuse traces the request, prompt, generation, and tool activity
+
+In other words, the "agent" behavior in this repo is custom TypeScript application logic wrapped around Claude. That layer is responsible for profile lookup, prompt selection, message history, optional web search, response shaping, and channel-specific behavior for browser chat versus WhatsApp. If helpful, you can think of it as a custom app-level agent built on top of Claude rather than a separate hosted agent runtime.
+
+### WhatsApp interaction diagram
+
+The diagram below shows the simple end-to-end path for a typical WhatsApp question.
+
+```mermaid
+flowchart LR
+  Dad["Dad sends message in WhatsApp"]
+  Network["WhatsApp / cell service / data connection"]
+  Twilio["Twilio receives the message"]
+  Webhook["POST /api/whatsapp"]
+  Agent["Agent loads context and profile"]
+  Lookup["Optional lookup loop:
+  profile data
+  session history
+  web search if needed"]
+  Reply["Agent generates final answer"]
+  Back["Twilio sends reply back to Dad"]
+
+  Dad --> Network
+  Network --> Twilio
+  Twilio --> Webhook
+  Webhook --> Agent
+  Agent --> Lookup
+  Lookup --> Agent
+  Agent --> Reply
+  Reply --> Twilio
+  Twilio --> Back
+```
+
+Important note:
+
+- The only "loop" here is the agent gathering what it needs before answering.
+- In practice that means using saved profile data, recent session history, and optional web search inside the same request before returning the final reply.
+
 ## Component map
 
 ### UI layer
