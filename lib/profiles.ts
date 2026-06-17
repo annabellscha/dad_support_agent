@@ -29,7 +29,7 @@ export async function getUserProfile(userId: string) {
   return profiles.find((profile) => profile.id === userId) ?? null;
 }
 
-export function normalizePhoneIdentifier(value: string) {
+function normalizePhoneIdentifier(value: string) {
   const withoutChannelPrefix = value.trim().replace(/^whatsapp:/i, "");
   const normalized = withoutChannelPrefix.replace(/[^\d+]/g, "");
 

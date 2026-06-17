@@ -78,6 +78,40 @@ flowchart LR
 
 This design keeps WhatsApp simple: one inbound webhook request in, one TwiML response out.
 
+### WhatsApp interaction diagram
+
+The diagram below shows the simple end-to-end path for a typical WhatsApp question.
+
+```mermaid
+flowchart LR
+  Dad["Dad sends message in WhatsApp"]
+  Network["WhatsApp / cell service / data connection"]
+  Twilio["Twilio receives the message"]
+  Webhook["POST /api/whatsapp"]
+  Agent["Agent loads context and profile"]
+  Lookup["Optional lookup loop:
+  profile data
+  session history
+  web search if needed"]
+  Reply["Agent generates final answer"]
+  Back["Twilio sends reply back to Dad"]
+
+  Dad --> Network
+  Network --> Twilio
+  Twilio --> Webhook
+  Webhook --> Agent
+  Agent --> Lookup
+  Lookup --> Agent
+  Agent --> Reply
+  Reply --> Twilio
+  Twilio --> Back
+```
+
+Important note:
+
+- The only "loop" here is the agent gathering what it needs before answering.
+- In practice that means using saved profile data, recent session history, and optional web search inside the same request before returning the final reply.
+
 ## Component map
 
 ### UI layer

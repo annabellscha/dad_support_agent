@@ -6,3 +6,4 @@ node_modules
 .codex/langfuse.json
 .codex/marketplaces/
 npm-debug.log*
+tsconfig.tsbuildinfo

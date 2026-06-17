@@ -209,7 +209,3 @@ export async function getDadSupportSystemPrompt(
     source: prompt.source,
   };
 }
-
-export function getDadSupportSystemPromptDefinition() {
-  return dadSupportSystemPromptDefinition;
-}
